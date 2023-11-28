@@ -369,7 +369,26 @@ pub(crate) fn atomic_write(path: &Path, content: &[u8]) -> io::Result<()> {
     tempfile.write_all(content)?;
     tempfile.flush()?;
     tempfile.as_file_mut().sync_data()?;
-    tempfile.into_temp_path().persist(path)?;
+    
+    let mut temp_path = tempfile.into_temp_path();
+    let mut retry_times = 0;
+
+    // 在 Windows 平台上，某些安全软件比如瑞星会占用文件导致文件重命名失败,
+    // 没办法，只好多试几次了, 这里我们最多重试10次
+    loop {
+        match temp_path.persist(path) {
+            Ok(_) => break,
+            Err(e) => {
+                if retry_times >= 10 {
+                    return Err(e.into());
+                } else {
+                    temp_path = e.path;
+                    retry_times += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+        }
+    }
     Ok(())
 }
 
